@@ -12,6 +12,9 @@ RUN npm install
 COPY public ./public
 COPY src ./src
 
+# Set API URL to empty (will use same-origin via nginx proxy)
+ENV REACT_APP_API_URL=""
+
 # Build the app
 RUN npm run build
 
