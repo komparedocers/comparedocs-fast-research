@@ -228,13 +228,27 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|_| "http://minio:9000".to_string());
     let bucket_name = std::env::var("S3_BUCKET")
         .unwrap_or_else(|_| "documents".to_string());
+    let access_key = std::env::var("AWS_ACCESS_KEY_ID")
+        .unwrap_or_else(|_| "minio".to_string());
+    let secret_key = std::env::var("AWS_SECRET_ACCESS_KEY")
+        .unwrap_or_else(|_| "minio123".to_string());
 
-    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .endpoint_url(s3_endpoint)
-        .load()
-        .await;
+    let credentials = aws_sdk_s3::config::Credentials::new(
+        access_key,
+        secret_key,
+        None,
+        None,
+        "static",
+    );
 
-    let s3_client = aws_sdk_s3::Client::new(&config);
+    let s3_config = aws_sdk_s3::config::Builder::new()
+        .endpoint_url(&s3_endpoint)
+        .credentials_provider(credentials)
+        .region(aws_sdk_s3::config::Region::new("us-east-1"))
+        .force_path_style(true)
+        .build();
+
+    let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
 
     let state = Arc::new(AppState {
         s3_client,
