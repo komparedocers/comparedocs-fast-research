@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use futures_util::StreamExt;
 use lapin::{
     options::*, types::FieldTable, BasicProperties, Channel, Connection, ConnectionProperties,
 };
