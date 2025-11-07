@@ -36,6 +36,7 @@ struct PageExtractedMessage {
 }
 
 struct Extractor {
+    _connection: Connection,
     channel: Channel,
     s3_client: aws_sdk_s3::Client,
     bucket_name: String,
@@ -94,6 +95,7 @@ impl Extractor {
         let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
 
         Ok(Self {
+            _connection: conn,
             channel,
             s3_client,
             bucket_name,
