@@ -32,16 +32,30 @@ function App() {
     const file = event.target.files[0];
     if (!file) return;
 
+    console.log('=== UPLOAD START ===');
+    console.log('File:', file.name);
+    console.log('Size:', file.size, 'bytes', `(${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+    console.log('Type:', file.type);
+    console.log('API URL:', API_URL);
+    console.log('Upload URL:', `${API_URL}/upload`);
+
     setUploading(true);
     const formData = new FormData();
     formData.append('file', file);
 
     try {
+      console.log('Sending upload request...');
       const response = await axios.post(`${API_URL}/upload`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          console.log(`Upload progress: ${percentCompleted}%`);
+        }
       });
+
+      console.log('Upload response:', response.data);
 
       if (side === 'left') {
         setLeftDoc(response.data.doc_id);
@@ -50,10 +64,25 @@ function App() {
       }
 
       await loadDocuments();
+      console.log('=== UPLOAD SUCCESS ===');
       alert(`Uploaded ${file.name} successfully!`);
     } catch (error) {
-      console.error('Error uploading:', error);
-      alert('Error uploading file');
+      console.error('=== UPLOAD ERROR ===');
+      console.error('Error details:', error);
+      console.error('Error response:', error.response);
+      console.error('Error status:', error.response?.status);
+      console.error('Error data:', error.response?.data);
+
+      let errorMessage = 'Error uploading file';
+      if (error.response?.status === 413) {
+        errorMessage = `File too large! The file is ${(file.size / 1024 / 1024).toFixed(2)} MB. Maximum upload size is 100 MB. The nginx configuration may not have been rebuilt yet.`;
+      } else if (error.response?.data?.detail) {
+        errorMessage = `Upload failed: ${error.response.data.detail}`;
+      } else if (error.message) {
+        errorMessage = `Upload failed: ${error.message}`;
+      }
+
+      alert(errorMessage);
     } finally {
       setUploading(false);
     }
