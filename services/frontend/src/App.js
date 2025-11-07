@@ -3,7 +3,8 @@ import axios from 'axios';
 import './App.css';
 import PerformanceTest from './PerformanceTest';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+// Use same origin - nginx will proxy to gateway service
+const API_URL = process.env.REACT_APP_API_URL || '';
 
 function App() {
   const [documents, setDocuments] = useState([]);
