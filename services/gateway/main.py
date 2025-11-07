@@ -92,9 +92,24 @@ async def ensure_bucket():
 
 @app.on_event("startup")
 async def startup():
+    import logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+
+    logger.info("="*60)
+    logger.info("GATEWAY SERVICE STARTING UP")
+    logger.info("="*60)
+    logger.info(f"S3_ENDPOINT: {S3_ENDPOINT}")
+    logger.info(f"S3_BUCKET: {S3_BUCKET}")
+    logger.info(f"DATABASE_URL: {DATABASE_URL}")
+    logger.info(f"BROKER_URL: {BROKER_URL}")
+
+    logger.info("Ensuring S3 bucket exists...")
     await ensure_bucket()
+    logger.info("S3 bucket ready")
 
     # Initialize database
+    logger.info("Initializing database tables...")
     conn = await get_db()
     async with conn.cursor() as cur:
         # Create tables if they don't exist
@@ -121,6 +136,10 @@ async def startup():
             )
         """)
         await conn.commit()
+    logger.info("Database tables ready")
+    logger.info("="*60)
+    logger.info("GATEWAY SERVICE READY")
+    logger.info("="*60)
 
 
 def calculate_sha256(data: bytes) -> str:
@@ -160,70 +179,97 @@ async def upload_document(
     file: UploadFile = File(...)
 ):
     """Upload a PDF document for processing"""
+    import logging
+    logger = logging.getLogger(__name__)
 
-    # Read file content
-    content = await file.read()
+    try:
+        logger.info(f"=== UPLOAD START === Filename: {file.filename}, Content-Type: {file.content_type}")
 
-    # Calculate hash for deduplication
-    sha256 = calculate_sha256(content)
+        # Read file content
+        logger.info("Reading file content...")
+        content = await file.read()
+        file_size = len(content)
+        logger.info(f"File read successfully. Size: {file_size} bytes ({file_size / 1024 / 1024:.2f} MB)")
 
-    # Check if already exists
-    conn = await get_db()
-    async with conn.cursor() as cur:
-        await cur.execute("SELECT id FROM documents WHERE sha256 = %s", (sha256,))
-        existing = await cur.fetchone()
+        # Calculate hash for deduplication
+        logger.info("Calculating SHA256 hash...")
+        sha256 = calculate_sha256(content)
+        logger.info(f"SHA256: {sha256}")
 
-        if existing:
-            await cur.execute("SELECT * FROM documents WHERE sha256 = %s", (sha256,))
-            row = await cur.fetchone()
-            return DocumentResponse(
-                doc_id=row[0],
-                filename=row[2],
-                size=row[3],
-                sha256=row[1],
-                page_count=row[4],
-                status=row[6],
-                created_at=row[5].isoformat(),
-            )
+        # Check if already exists
+        logger.info("Checking for existing document in database...")
+        conn = await get_db()
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT id FROM documents WHERE sha256 = %s", (sha256,))
+            existing = await cur.fetchone()
 
-    # Generate document ID
-    doc_id = str(uuid.uuid4())
+            if existing:
+                logger.info(f"Document already exists with ID: {existing[0]}")
+                await cur.execute("SELECT * FROM documents WHERE sha256 = %s", (sha256,))
+                row = await cur.fetchone()
+                return DocumentResponse(
+                    doc_id=row[0],
+                    filename=row[2],
+                    size=row[3],
+                    sha256=row[1],
+                    page_count=row[4],
+                    status=row[6],
+                    created_at=row[5].isoformat(),
+                )
 
-    # Get page count
-    page_count = get_pdf_page_count(content)
+        # Generate document ID
+        doc_id = str(uuid.uuid4())
+        logger.info(f"Generated new document ID: {doc_id}")
 
-    # Upload to S3
-    s3_key = f"pdfs/{sha256}.pdf"
-    s3_client.put_object(
-        Bucket=S3_BUCKET,
-        Key=s3_key,
-        Body=content,
-    )
-    s3_uri = f"s3://{S3_BUCKET}/{s3_key}"
+        # Get page count
+        logger.info("Counting PDF pages...")
+        page_count = get_pdf_page_count(content)
+        logger.info(f"PDF has {page_count} pages")
 
-    # Store metadata
-    async with conn.cursor() as cur:
-        await cur.execute(
-            """
-            INSERT INTO documents (id, sha256, filename, size, page_count, created_at, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """,
-            (doc_id, sha256, file.filename, len(content), page_count, datetime.utcnow(), "processing")
+        # Upload to S3
+        logger.info(f"Uploading to S3: bucket={S3_BUCKET}")
+        s3_key = f"pdfs/{sha256}.pdf"
+        s3_client.put_object(
+            Bucket=S3_BUCKET,
+            Key=s3_key,
+            Body=content,
         )
-        await conn.commit()
+        s3_uri = f"s3://{S3_BUCKET}/{s3_key}"
+        logger.info(f"S3 upload successful: {s3_uri}")
 
-    # Emit processing event
-    background_tasks.add_task(process_pdf_pages, doc_id, s3_uri, sha256)
+        # Store metadata
+        logger.info("Storing document metadata in database...")
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO documents (id, sha256, filename, size, page_count, created_at, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (doc_id, sha256, file.filename, len(content), page_count, datetime.utcnow(), "processing")
+            )
+            await conn.commit()
+        logger.info("Database insert successful")
 
-    return DocumentResponse(
-        doc_id=doc_id,
-        filename=file.filename,
-        size=len(content),
-        sha256=sha256,
-        page_count=page_count,
-        status="processing",
-        created_at=datetime.utcnow().isoformat(),
-    )
+        # Emit processing event
+        logger.info("Emitting ingest.pdf event to message broker...")
+        background_tasks.add_task(process_pdf_pages, doc_id, s3_uri, sha256)
+        logger.info("Background task scheduled")
+
+        logger.info(f"=== UPLOAD COMPLETE === Document ID: {doc_id}")
+
+        return DocumentResponse(
+            doc_id=doc_id,
+            filename=file.filename,
+            size=len(content),
+            sha256=sha256,
+            page_count=page_count,
+            status="processing",
+            created_at=datetime.utcnow().isoformat(),
+        )
+
+    except Exception as e:
+        logger.error(f"=== UPLOAD ERROR === {type(e).__name__}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
 @app.get("/documents")
@@ -413,6 +459,21 @@ async def get_comparison_report(comparison_id: str):
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+@app.get("/config")
+async def get_config():
+    """Get current configuration for debugging"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("Config endpoint accessed")
+
+    return {
+        "s3_endpoint": S3_ENDPOINT,
+        "s3_bucket": S3_BUCKET,
+        "database_connected": db_conn is not None and not db_conn.closed if db_conn else False,
+        "rabbitmq_connected": rabbitmq_connection is not None and not rabbitmq_connection.is_closed if rabbitmq_connection else False,
+    }
 
 
 if __name__ == "__main__":
