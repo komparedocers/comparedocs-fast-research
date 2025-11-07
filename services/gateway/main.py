@@ -299,23 +299,38 @@ async def list_documents():
 async def compare_documents(req: CompareRequest):
     """Compare two documents"""
     import httpx
+    import logging
+    logger = logging.getLogger(__name__)
+
+    logger.info("="*60)
+    logger.info("=== COMPARE START ===")
+    logger.info(f"Left doc: {req.left_doc_id}")
+    logger.info(f"Right doc: {req.right_doc_id}")
 
     comparison_id = str(uuid.uuid4())
+    logger.info(f"Generated comparison ID: {comparison_id}")
 
     # Store comparison request
-    conn = await get_db()
-    async with conn.cursor() as cur:
-        await cur.execute(
-            """
-            INSERT INTO comparisons (id, left_doc_id, right_doc_id, status, created_at)
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (comparison_id, req.left_doc_id, req.right_doc_id, "processing", datetime.utcnow())
-        )
-        await conn.commit()
+    try:
+        logger.info("Storing comparison request in database...")
+        conn = await get_db()
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO comparisons (id, left_doc_id, right_doc_id, status, created_at)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (comparison_id, req.left_doc_id, req.right_doc_id, "processing", datetime.utcnow())
+            )
+            await conn.commit()
+        logger.info("Comparison request stored successfully")
+    except Exception as e:
+        logger.error(f"Database error storing comparison: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
     # Call Rust comparator service
     try:
+        logger.info("Calling Rust comparator service at http://rust-comparator:8001/compare")
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 "http://rust-comparator:8001/compare",
@@ -326,10 +341,14 @@ async def compare_documents(req: CompareRequest):
                 timeout=300.0  # 5 minutes timeout
             )
 
+            logger.info(f"Rust comparator response status: {response.status_code}")
+
             if response.status_code == 200:
                 result = response.json()
+                logger.info(f"Comparison successful. Found {len(result.get('matches', []))} matches")
 
                 # Update comparison with result
+                logger.info("Updating comparison result in database...")
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
@@ -340,12 +359,38 @@ async def compare_documents(req: CompareRequest):
                         ("completed", json.dumps(result), datetime.utcnow(), comparison_id)
                     )
                     await conn.commit()
+                logger.info("Database updated successfully")
 
+                logger.info("=== COMPARE COMPLETE ===")
+                logger.info("="*60)
                 return result
             else:
-                raise HTTPException(status_code=500, detail="Comparison failed")
+                error_text = response.text
+                logger.error(f"Rust comparator failed with status {response.status_code}: {error_text}")
+                raise HTTPException(status_code=500, detail=f"Comparison failed: {error_text}")
+
+    except httpx.TimeoutException as e:
+        logger.error(f"Timeout calling rust-comparator: {e}")
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE comparisons SET status = %s WHERE id = %s",
+                ("failed", comparison_id)
+            )
+            await conn.commit()
+        raise HTTPException(status_code=500, detail="Comparison timed out after 5 minutes")
+
+    except httpx.ConnectError as e:
+        logger.error(f"Cannot connect to rust-comparator service: {e}")
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE comparisons SET status = %s WHERE id = %s",
+                ("failed", comparison_id)
+            )
+            await conn.commit()
+        raise HTTPException(status_code=500, detail="Cannot connect to comparison service. Is rust-comparator running?")
 
     except Exception as e:
+        logger.error(f"=== COMPARE ERROR === {type(e).__name__}: {str(e)}", exc_info=True)
         # Update comparison status
         async with conn.cursor() as cur:
             await cur.execute(
@@ -354,7 +399,7 @@ async def compare_documents(req: CompareRequest):
             )
             await conn.commit()
 
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Comparison error: {str(e)}")
 
 
 @app.get("/comparisons/{comparison_id}")
