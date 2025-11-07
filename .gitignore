@@ -1,0 +1,46 @@
+# Rust
+**/target/
+**/*.rs.bk
+**/Cargo.lock
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/*.so
+**/.Python
+**/env/
+**/venv/
+**/.venv
+**/pip-log.txt
+**/.pytest_cache/
+
+# Node
+**/node_modules/
+**/build/
+**/.pnp
+**/.pnp.js
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+
+# Environment
+.env
+.env.local
+
+# Docker
+**/.dockerignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
