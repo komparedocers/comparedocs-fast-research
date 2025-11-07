@@ -135,25 +135,23 @@ def get_pdf_page_count(data: bytes) -> int:
         return 1  # Default to 1 if can't read
 
 
-async def process_pdf_pages(doc_id: str, s3_uri: str, page_count: int):
-    """Background task to fan out page processing"""
+async def process_pdf_pages(doc_id: str, s3_uri: str, sha256: str):
+    """Background task to emit ingest message for PDF orchestrator"""
     channel = await get_rabbitmq_channel()
 
-    for page_no in range(page_count):
-        message = {
-            "doc_id": doc_id,
-            "page_no": page_no,
-            "s3_uri": s3_uri,
-            "sha256": doc_id  # Using doc_id as identifier
-        }
+    message = {
+        "doc_id": doc_id,
+        "s3_uri": s3_uri,
+        "sha256": sha256
+    }
 
-        await channel.default_exchange.publish(
-            aio_pika.Message(
-                body=json.dumps(message).encode(),
-                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-            ),
-            routing_key="page.ready",
-        )
+    await channel.default_exchange.publish(
+        aio_pika.Message(
+            body=json.dumps(message).encode(),
+            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+        ),
+        routing_key="ingest.pdf",
+    )
 
 
 @app.post("/upload", response_model=DocumentResponse)
@@ -215,7 +213,7 @@ async def upload_document(
         await conn.commit()
 
     # Emit processing event
-    background_tasks.add_task(process_pdf_pages, doc_id, s3_uri, page_count)
+    background_tasks.add_task(process_pdf_pages, doc_id, s3_uri, sha256)
 
     return DocumentResponse(
         doc_id=doc_id,
@@ -336,6 +334,80 @@ async def get_comparison(comparison_id: str):
             "created_at": row[5].isoformat() if row[5] else None,
             "completed_at": row[6].isoformat() if row[6] else None,
         }
+
+
+@app.get("/comparisons/{comparison_id}/report")
+async def get_comparison_report(comparison_id: str):
+    """Generate and return HTML report for comparison"""
+    from jinja2 import Template
+
+    conn = await get_db()
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT * FROM comparisons WHERE id = %s",
+            (comparison_id,)
+        )
+        row = await cur.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Comparison not found")
+
+        result = row[4]  # result JSONB column
+
+        if not result:
+            raise HTTPException(status_code=400, detail="Comparison not yet completed")
+
+    # Read template
+    template_path = os.path.join(os.path.dirname(__file__), "report_template.html")
+    if not os.path.exists(template_path):
+        # Fallback to simple HTML if template not found
+        template_content = """
+        <html>
+        <head><title>Comparison Report</title></head>
+        <body>
+            <h1>Comparison Report</h1>
+            <h2>Summary</h2>
+            <p>Compliant: {{ compliant_count }} ({{ "%.1f"|format(compliant_percentage) }}%)</p>
+            <p>Non-Compliant: {{ non_compliant_count }} ({{ "%.1f"|format(non_compliant_percentage) }}%)</p>
+            <h2>Details</h2>
+            <table border="1" style="width:100%; border-collapse: collapse;">
+                <tr>
+                    <th>Left Document</th>
+                    <th>Right Document</th>
+                    <th>Status & Percentage</th>
+                </tr>
+                {% for match in matches %}
+                <tr>
+                    <td>{{ match.left_text[:200] }}...</td>
+                    <td>{{ match.right_text[:200] }}...</td>
+                    <td>
+                        {% if match.match_type == 'exact' or match.match_type == 'similar' %}
+                        COMPLIANT
+                        {% else %}
+                        NON-COMPLIANT
+                        {% endif %}
+                        <br>{{ "%.1f"|format(match.similarity_score * 100) }}%
+                    </td>
+                </tr>
+                {% endfor %}
+            </table>
+        </body>
+        </html>
+        """
+    else:
+        with open(template_path, 'r') as f:
+            template_content = f.read()
+
+    template = Template(template_content)
+
+    html_report = template.render(
+        comparison_id=comparison_id,
+        timestamp=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        **result
+    )
+
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=html_report)
 
 
 @app.get("/health")

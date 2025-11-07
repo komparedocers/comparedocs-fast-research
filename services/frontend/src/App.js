@@ -198,8 +198,51 @@ function App() {
                 </div>
               </div>
 
+              <div style={{ textAlign: 'center', margin: '30px 0' }}>
+                <button
+                  onClick={() => window.open(`${API_URL}/comparisons/${comparisonResult.comparison_id}/report`, '_blank')}
+                  className="report-button"
+                >
+                  📄 Download Full Report (HTML)
+                </button>
+              </div>
+
               <div className="matches-section">
-                <h3>Detailed Matches ({comparisonResult.matches.length})</h3>
+                <h3>Detailed Comparison Table (3 Columns)</h3>
+                <p style={{ marginBottom: '20px', color: '#666' }}>
+                  Left Document | Right Document | Status & Percentage
+                </p>
+
+                <table className="comparison-table">
+                  <thead>
+                    <tr>
+                      <th>Left Document Paragraph</th>
+                      <th>Right Document Paragraph</th>
+                      <th>Compliance Status & Percentage</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comparisonResult.matches.map((match, idx) => (
+                      <tr key={idx}>
+                        <td>{match.left_text.substring(0, 200)}{match.left_text.length > 200 ? '...' : ''}</td>
+                        <td>{match.right_text.substring(0, 200)}{match.right_text.length > 200 ? '...' : ''}</td>
+                        <td>
+                          <div className={`status-badge ${match.match_type === 'exact' || match.match_type === 'similar' ? 'compliant' : 'non-compliant'}`}>
+                            {match.match_type === 'exact' || match.match_type === 'similar' ? '✓ COMPLIANT' : '✗ NON-COMPLIANT'}
+                          </div>
+                          <div style={{ fontSize: '18px', fontWeight: 'bold', marginTop: '8px' }}>
+                            {(match.similarity_score * 100).toFixed(1)}%
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                            Type: {match.match_type.toUpperCase()}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <h3 style={{ marginTop: '40px' }}>Detailed Matches ({comparisonResult.matches.length})</h3>
                 <div className="matches-list">
                   {comparisonResult.matches.map((match, idx) => (
                     <div

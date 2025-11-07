@@ -95,6 +95,24 @@ services:
     networks:
       - doccompare
 
+  # PDF Orchestrator
+  pdf-orchestrator:
+    build: ./services/pdf-orchestrator
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: documents
+      BROKER_URL: amqp://guest:guest@broker:5672/
+      RUST_LOG: info
+      AWS_ACCESS_KEY_ID: minio
+      AWS_SECRET_ACCESS_KEY: minio123
+    depends_on:
+      broker:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - doccompare
+
   # Rust Text Extractor
   rust-extractor:
     build: ./services/rust-extractor

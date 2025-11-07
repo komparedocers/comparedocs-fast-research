@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Document Comparison Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            background: #f5f5f5;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        .header h1 {
+            margin: 0 0 10px 0;
+        }
+        .summary {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .summary-card {
+            text-align: center;
+            padding: 15px;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+        .summary-card.compliant {
+            background: #d4edda;
+            border: 2px solid #28a745;
+        }
+        .summary-card.non-compliant {
+            background: #f8d7da;
+            border: 2px solid #dc3545;
+        }
+        .summary-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #666;
+        }
+        .summary-card .value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #333;
+        }
+        .results-table {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th {
+            background: #667eea;
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        tr:hover {
+            background: #f8f9fa;
+        }
+        .paragraph-cell {
+            max-width: 400px;
+            word-wrap: break-word;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 12px;
+        }
+        .status-compliant {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status-non-compliant {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .percentage {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            color: #666;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📊 Document Comparison Report</h1>
+        <p>Generated: {{ timestamp }}</p>
+        <p>Comparison ID: {{ comparison_id }}</p>
+    </div>
+
+    <div class="summary">
+        <h2>Summary Statistics</h2>
+        <div class="summary-grid">
+            <div class="summary-card compliant">
+                <h3>Compliant Paragraphs</h3>
+                <div class="value">{{ compliant_count }}</div>
+            </div>
+            <div class="summary-card non-compliant">
+                <h3>Non-Compliant Paragraphs</h3>
+                <div class="value">{{ non_compliant_count }}</div>
+            </div>
+            <div class="summary-card">
+                <h3>Compliant %</h3>
+                <div class="value">{{ "%.1f"|format(compliant_percentage) }}%</div>
+            </div>
+            <div class="summary-card">
+                <h3>Processing Time</h3>
+                <div class="value">{{ processing_time_ms }}ms</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="results-table">
+        <h2>Detailed Comparison Results</h2>
+        <p>Three-column analysis: Left Document | Right Document | Compliance Status & Percentage</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 35%">Left Document Paragraph</th>
+                    <th style="width: 35%">Right Document Paragraph</th>
+                    <th style="width: 30%">Status & Similarity</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for match in matches %}
+                <tr>
+                    <td class="paragraph-cell">{{ match.left_text[:300] }}{% if match.left_text|length > 300 %}...{% endif %}</td>
+                    <td class="paragraph-cell">{{ match.right_text[:300] }}{% if match.right_text|length > 300 %}...{% endif %}</td>
+                    <td>
+                        {% if match.match_type == 'exact' or match.match_type == 'similar' %}
+                        <span class="status-badge status-compliant">✓ COMPLIANT</span>
+                        {% else %}
+                        <span class="status-badge status-non-compliant">✗ NON-COMPLIANT</span>
+                        {% endif %}
+                        <div class="percentage">{{ "%.1f"|format(match.similarity_score * 100) }}%</div>
+                        <div style="font-size: 12px; color: #666; margin-top: 5px;">
+                            Type: {{ match.match_type|upper }}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="footer">
+        <p>DocCompare - Ultra-Fast Document Anomaly Detection System</p>
+        <p>Report generated automatically from {{ total_chunks_left }} left chunks and {{ total_chunks_right }} right chunks</p>
+    </div>
+</body>
+</html>

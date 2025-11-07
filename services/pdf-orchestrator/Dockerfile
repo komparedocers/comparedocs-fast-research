@@ -30,8 +30,8 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/rust-extractor /usr/local/bin/rust-extractor
+COPY --from=builder /app/target/release/pdf-orchestrator /usr/local/bin/pdf-orchestrator
 
 ENV RUST_LOG=info
 
-CMD ["rust-extractor"]
+CMD ["pdf-orchestrator"]
