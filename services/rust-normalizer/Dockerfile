@@ -1,4 +1,4 @@
-FROM rust:1.83-slim as builder
+FROM rustlang/rust:nightly-slim as builder
 
 WORKDIR /app
 
@@ -13,14 +13,14 @@ COPY Cargo.toml ./
 
 # Create a dummy main to cache dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
-RUN cargo build --release
+RUN cargo +nightly build --release
 RUN rm -rf src
 
 # Copy source code
 COPY src ./src
 
 # Build the actual application
-RUN cargo build --release
+RUN cargo +nightly build --release
 
 # Runtime stage
 FROM debian:bookworm-slim
