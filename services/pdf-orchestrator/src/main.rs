@@ -186,9 +186,13 @@ impl Orchestrator {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    println!("=== PDF ORCHESTRATOR STARTING ===");
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+
+    info!("PDF orchestrator initializing...");
 
     let amqp_url = std::env::var("BROKER_URL")
         .unwrap_or_else(|_| "amqp://guest:guest@broker:5672".to_string());

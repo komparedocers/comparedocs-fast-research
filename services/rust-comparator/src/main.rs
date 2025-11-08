@@ -220,9 +220,13 @@ async fn compare(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    println!("=== RUST COMPARATOR STARTING ===");
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+
+    info!("Rust comparator initializing...");
 
     let s3_endpoint = std::env::var("S3_ENDPOINT")
         .unwrap_or_else(|_| "http://minio:9000".to_string());
