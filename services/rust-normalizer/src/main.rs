@@ -264,9 +264,13 @@ impl Normalizer {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    println!("=== RUST NORMALIZER STARTING ===");
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+
+    info!("Rust normalizer initializing...");
 
     let amqp_url = std::env::var("BROKER_URL").unwrap_or_else(|_| "amqp://guest:guest@broker:5672".to_string());
     let s3_endpoint = std::env::var("S3_ENDPOINT").unwrap_or_else(|_| "http://minio:9000".to_string());
