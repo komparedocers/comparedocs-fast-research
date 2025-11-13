@@ -94,19 +94,50 @@ function App() {
       return;
     }
 
+    console.log('=== COMPARISON START ===');
+    console.log('Left document ID:', leftDoc);
+    console.log('Right document ID:', rightDoc);
+    console.log('API URL:', API_URL);
+    console.log('Compare URL:', `${API_URL}/compare`);
+
     setComparing(true);
     setComparisonResult(null);
 
     try {
+      console.log('Sending comparison request...');
       const response = await axios.post(`${API_URL}/compare`, {
         left_doc_id: leftDoc,
         right_doc_id: rightDoc,
       });
 
+      console.log('Comparison response received:');
+      console.log('- Comparison ID:', response.data.comparison_id);
+      console.log('- Total matches:', response.data.matches?.length);
+      console.log('- Compliant:', response.data.compliant_count, `(${response.data.compliant_percentage?.toFixed(2)}%)`);
+      console.log('- Non-compliant:', response.data.non_compliant_count, `(${response.data.non_compliant_percentage?.toFixed(2)}%)`);
+      console.log('- Processing time:', response.data.processing_time_ms, 'ms');
+
       setComparisonResult(response.data);
+      console.log('=== COMPARISON SUCCESS ===');
     } catch (error) {
-      console.error('Error comparing:', error);
-      alert('Error comparing documents');
+      console.error('=== COMPARISON ERROR ===');
+      console.error('Error details:', error);
+      console.error('Error response:', error.response);
+      console.error('Error status:', error.response?.status);
+      console.error('Error data:', error.response?.data);
+
+      let errorMessage = 'Error comparing documents';
+      if (error.response?.status === 500) {
+        errorMessage = `Server error during comparison: ${error.response?.data?.detail || 'Internal server error'}`;
+      } else if (error.response?.status === 404) {
+        errorMessage = 'One or both documents not found. They may still be processing.';
+      } else if (error.response?.data?.detail) {
+        errorMessage = `Comparison failed: ${error.response.data.detail}`;
+      } else if (error.message) {
+        errorMessage = `Comparison failed: ${error.message}`;
+      }
+
+      alert(errorMessage);
     } finally {
       setComparing(false);
     }
