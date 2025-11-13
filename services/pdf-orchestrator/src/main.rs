@@ -31,13 +31,17 @@ struct Orchestrator {
 
 impl Orchestrator {
     async fn new(amqp_url: &str, s3_endpoint: &str, bucket_name: String) -> Result<Self> {
+        info!("Connecting to RabbitMQ at: {}", amqp_url);
         let conn = Connection::connect(amqp_url, ConnectionProperties::default())
             .await
             .context("Failed to connect to RabbitMQ")?;
+        info!("✓ RabbitMQ connection established");
 
         let channel = conn.create_channel().await?;
+        info!("✓ RabbitMQ channel created");
 
         // Declare queues
+        info!("Declaring queue: ingest.pdf");
         channel
             .queue_declare(
                 "ingest.pdf",
@@ -49,6 +53,7 @@ impl Orchestrator {
             )
             .await?;
 
+        info!("Declaring queue: page.ready");
         channel
             .queue_declare(
                 "page.ready",
@@ -59,11 +64,13 @@ impl Orchestrator {
                 FieldTable::default(),
             )
             .await?;
+        info!("✓ Queues declared successfully");
 
         // Configure S3 client
         let access_key = std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_else(|_| "minio".to_string());
         let secret_key = std::env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_else(|_| "minio123".to_string());
 
+        info!("Initializing S3 client for endpoint: {}", s3_endpoint);
         let credentials = aws_sdk_s3::config::Credentials::new(
             access_key,
             secret_key,
@@ -80,6 +87,7 @@ impl Orchestrator {
             .build();
 
         let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
+        info!("✓ S3 client initialized");
 
         Ok(Self {
             _connection: conn,
@@ -151,7 +159,7 @@ impl Orchestrator {
     }
 
     async fn start(&self) -> Result<()> {
-        info!("Starting PDF orchestrator worker...");
+        info!("Starting PDF orchestrator worker, subscribing to queue: ingest.pdf");
 
         let mut consumer = self
             .channel
@@ -161,12 +169,19 @@ impl Orchestrator {
                 BasicConsumeOptions::default(),
                 FieldTable::default(),
             )
-            .await?;
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to start consumer: {}", e);
+                e
+            })?;
+
+        info!("✓ PDF orchestrator ready and waiting for messages on queue 'ingest.pdf'");
 
         while let Some(delivery) = consumer.next().await {
             if let Ok(delivery) = delivery {
                 match serde_json::from_slice::<IngestPdfMessage>(&delivery.data) {
                     Ok(msg) => {
+                        info!("Received ingest.pdf message for doc: {}", msg.doc_id);
                         if let Err(e) = self.process_pdf(msg).await {
                             error!("Error processing PDF: {}", e);
                         }
@@ -180,6 +195,7 @@ impl Orchestrator {
             }
         }
 
+        tracing::warn!("Consumer loop ended unexpectedly");
         Ok(())
     }
 }
@@ -200,9 +216,16 @@ async fn main() -> Result<()> {
         std::env::var("S3_ENDPOINT").unwrap_or_else(|_| "http://minio:9000".to_string());
     let bucket_name = std::env::var("S3_BUCKET").unwrap_or_else(|_| "documents".to_string());
 
-    info!("Connecting to broker at {}", amqp_url);
-    let orchestrator = Orchestrator::new(&amqp_url, &s3_endpoint, bucket_name).await?;
+    info!("Configuration loaded - Broker: {}, S3: {}, Bucket: {}", amqp_url, s3_endpoint, bucket_name);
 
+    info!("Connecting to RabbitMQ broker...");
+    let orchestrator = Orchestrator::new(&amqp_url, &s3_endpoint, bucket_name).await
+        .map_err(|e| {
+            tracing::error!("Failed to initialize orchestrator: {}", e);
+            e
+        })?;
+
+    info!("✓ Orchestrator initialized, starting message consumer...");
     orchestrator.start().await?;
 
     Ok(())

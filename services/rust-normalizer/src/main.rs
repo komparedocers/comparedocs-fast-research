@@ -56,13 +56,17 @@ struct Normalizer {
 
 impl Normalizer {
     async fn new(amqp_url: &str, s3_endpoint: &str, bucket_name: String) -> Result<Self> {
+        info!("Connecting to RabbitMQ at: {}", amqp_url);
         let conn = Connection::connect(amqp_url, ConnectionProperties::default())
             .await
             .context("Failed to connect to RabbitMQ")?;
+        info!("✓ RabbitMQ connection established");
 
         let channel = conn.create_channel().await?;
+        info!("✓ RabbitMQ channel created");
 
         // Declare queues
+        info!("Declaring queue: page.extracted");
         channel
             .queue_declare(
                 "page.extracted",
@@ -74,6 +78,7 @@ impl Normalizer {
             )
             .await?;
 
+        info!("Declaring queue: page.chunked");
         channel
             .queue_declare(
                 "page.chunked",
@@ -84,11 +89,13 @@ impl Normalizer {
                 FieldTable::default(),
             )
             .await?;
+        info!("✓ Queues declared successfully");
 
         // Configure S3 client
         let access_key = std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_else(|_| "minio".to_string());
         let secret_key = std::env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_else(|_| "minio123".to_string());
 
+        info!("Initializing S3 client for endpoint: {}", s3_endpoint);
         let credentials = aws_sdk_s3::config::Credentials::new(
             access_key,
             secret_key,
@@ -105,6 +112,7 @@ impl Normalizer {
             .build();
 
         let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
+        info!("✓ S3 client initialized");
 
         Ok(Self {
             _connection: conn,
@@ -229,7 +237,7 @@ impl Normalizer {
     }
 
     async fn start(&self) -> Result<()> {
-        info!("Starting normalizer worker...");
+        info!("Starting normalizer worker, subscribing to queue: page.extracted");
 
         let mut consumer = self
             .channel
@@ -239,12 +247,19 @@ impl Normalizer {
                 BasicConsumeOptions::default(),
                 FieldTable::default(),
             )
-            .await?;
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to start consumer: {}", e);
+                e
+            })?;
+
+        info!("✓ Normalizer worker ready and waiting for messages on queue 'page.extracted'");
 
         while let Some(delivery) = consumer.next().await {
             if let Ok(delivery) = delivery {
                 match serde_json::from_slice::<PageExtractedMessage>(&delivery.data) {
                     Ok(msg) => {
+                        info!("Received page.extracted message for doc: {}, page: {}", msg.doc_id, msg.page_no);
                         if let Err(e) = self.process_message(msg).await {
                             error!("Error processing message: {}", e);
                         }
@@ -258,6 +273,7 @@ impl Normalizer {
             }
         }
 
+        tracing::warn!("Consumer loop ended unexpectedly");
         Ok(())
     }
 }
@@ -276,9 +292,16 @@ async fn main() -> Result<()> {
     let s3_endpoint = std::env::var("S3_ENDPOINT").unwrap_or_else(|_| "http://minio:9000".to_string());
     let bucket_name = std::env::var("S3_BUCKET").unwrap_or_else(|_| "documents".to_string());
 
-    info!("Connecting to broker at {}", amqp_url);
-    let normalizer = Normalizer::new(&amqp_url, &s3_endpoint, bucket_name).await?;
+    info!("Configuration loaded - Broker: {}, S3: {}, Bucket: {}", amqp_url, s3_endpoint, bucket_name);
 
+    info!("Connecting to RabbitMQ broker...");
+    let normalizer = Normalizer::new(&amqp_url, &s3_endpoint, bucket_name).await
+        .map_err(|e| {
+            tracing::error!("Failed to initialize normalizer: {}", e);
+            e
+        })?;
+
+    info!("✓ Normalizer initialized, starting message consumer...");
     normalizer.start().await?;
 
     Ok(())
