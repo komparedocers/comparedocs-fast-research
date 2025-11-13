@@ -76,24 +76,40 @@ impl AppState {
 
         // Try to list all chunk files for this document
         let prefix = format!("chunks/{}/", doc_id);
+        info!("Listing S3 objects with prefix: {} in bucket: {}", prefix, self.bucket_name);
+
         let objects = self.s3_client
             .list_objects_v2()
             .bucket(&self.bucket_name)
             .prefix(&prefix)
             .send()
-            .await?;
+            .await
+            .map_err(|e| {
+                tracing::error!("S3 list_objects_v2 failed for prefix {}: {}", prefix, e);
+                anyhow::anyhow!("S3 list failed: {}", e)
+            })?;
 
         if let Some(contents) = objects.contents {
+            info!("Found {} chunk files in S3 for doc: {}", contents.len(), doc_id);
             for obj in contents {
                 if let Some(key) = obj.key {
+                    info!("Downloading chunk file: {}", key);
                     let data = self.download_from_s3(&key).await?;
-                    let chunks: Vec<Chunk> = serde_json::from_slice(&data)?;
+                    let chunks: Vec<Chunk> = serde_json::from_slice(&data)
+                        .map_err(|e| {
+                            tracing::error!("Failed to parse JSON from {}: {}", key, e);
+                            anyhow::anyhow!("JSON parse failed: {}", e)
+                        })?;
+                    info!("Loaded {} chunks from {}", chunks.len(), key);
                     all_chunks.extend(chunks);
                 }
             }
+        } else {
+            tracing::warn!("No chunk files found in S3 for doc: {}", doc_id);
         }
 
         all_chunks.sort_by_key(|c| (c.page_no, c.order));
+        info!("Total chunks loaded for {}: {}", doc_id, all_chunks.len());
         Ok(all_chunks)
     }
 
@@ -146,12 +162,24 @@ impl AppState {
         let start = Instant::now();
         let comparison_id = uuid::Uuid::new_v4().to_string();
 
-        info!("Loading chunks for documents {} and {}", req.left_doc_id, req.right_doc_id);
+        info!("=== COMPARISON START === ID: {}, Left: {}, Right: {}",
+            comparison_id, req.left_doc_id, req.right_doc_id);
 
-        let left_chunks = self.load_chunks(&req.left_doc_id).await?;
-        let right_chunks = self.load_chunks(&req.right_doc_id).await?;
+        info!("Loading chunks from S3 for left document: {}", req.left_doc_id);
+        let left_chunks = self.load_chunks(&req.left_doc_id).await
+            .map_err(|e| {
+                tracing::error!("Failed to load left document chunks: {}", e);
+                e
+            })?;
 
-        info!("Loaded {} left chunks and {} right chunks", left_chunks.len(), right_chunks.len());
+        info!("Loading chunks from S3 for right document: {}", req.right_doc_id);
+        let right_chunks = self.load_chunks(&req.right_doc_id).await
+            .map_err(|e| {
+                tracing::error!("Failed to load right document chunks: {}", e);
+                e
+            })?;
+
+        info!("✓ Loaded {} left chunks and {} right chunks", left_chunks.len(), right_chunks.len());
 
         let mut matches = Vec::new();
 
@@ -237,6 +265,8 @@ async fn main() -> Result<()> {
     let secret_key = std::env::var("AWS_SECRET_ACCESS_KEY")
         .unwrap_or_else(|_| "minio123".to_string());
 
+    info!("Configuration loaded - S3: {}, Bucket: {}", s3_endpoint, bucket_name);
+
     let credentials = aws_sdk_s3::config::Credentials::new(
         access_key,
         secret_key,
@@ -253,6 +283,7 @@ async fn main() -> Result<()> {
         .build();
 
     let s3_client = aws_sdk_s3::Client::from_conf(s3_config);
+    info!("S3 client initialized successfully");
 
     let state = Arc::new(AppState {
         s3_client,
@@ -266,9 +297,16 @@ async fn main() -> Result<()> {
         .with_state(state);
 
     let addr = "0.0.0.0:8001";
-    info!("Rust comparator listening on {}", addr);
+    info!("Binding to address: {}", addr);
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let listener = tokio::net::TcpListener::bind(addr).await
+        .map_err(|e| {
+            tracing::error!("Failed to bind to {}: {}", addr, e);
+            e
+        })?;
+
+    info!("✓ Rust comparator successfully started and listening on {}", addr);
+
     axum::serve(listener, app).await?;
 
     Ok(())
